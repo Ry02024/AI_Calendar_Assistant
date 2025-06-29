@@ -6,12 +6,25 @@ from src.calendar_agent import tools
 from datetime import datetime, timedelta
 import json
 import re
+from .knowledge_handler import load_knowledge_texts
 
 class CalendarAgent:
     """カレンダー操作を行うAIエージェント (Function Calling非対応Gemini用)"""
     def __init__(self):
+        self._init_knowledge()
         self.client = genai.Client(api_key=config.GEMINI_API_KEY)
-        self.system_instruction = f"""
+        self.system_instruction = self._build_system_instruction()
+        self.chat = self.client.chats.create(model=config.MODEL_NAME)
+        self.chat.send_message(self.system_instruction)
+        self._last_candidates = None
+
+    def _init_knowledge(self):
+        knowledge = load_knowledge_texts()
+        self.knowledge_text = "\n\n".join([f"【{k}】\n{v}" for k, v in knowledge.items()]) if knowledge else ""
+
+    def _build_system_instruction(self):
+        today = datetime.now(tools.JST).strftime('%Y-%m-%d')
+        return f"""
 あなたは優秀で親切な日本語カレンダーアシスタントです。ユーザーの自然言語による指示を理解し、予定の追加・確認・削除などの指示があれば、必ず下記のJSON形式で返答してください。
 ---
 {{
@@ -26,97 +39,40 @@ class CalendarAgent:
 ---
 複数予定の場合は複数のJSONコードブロックで返してください。
 予定追加・削除・確認以外の質問は通常通り日本語で答えてください。
-現在の日付: {datetime.now(tools.JST).strftime('%Y-%m-%d')}
+現在の日付: {today}
+---\n【あなたの知識】\n{self.knowledge_text}
 """
-        self.chat = self.client.chats.create(model=config.MODEL_NAME)
-        self.chat.send_message(self.system_instruction)
 
     def start_message(self):
         print("AI秘書です。カレンダーの調整など、何でもお申し付けください。(「終了」と入力して会話を終了)")
         print("-" * 50)
 
     def send_message(self, user_input: str) -> str:
-        # イベントIDだけが入力された場合は即削除
+        # 事前分岐
         if re.fullmatch(r'[a-z0-9]{10,}', user_input.strip()):
-            event_id = user_input.strip()
-            del_result = tools.delete_calendar_event(event_id)
-            msg = json.loads(del_result).get('message', f'イベントID {event_id} を削除しました。')
-            return msg
-        # 「詳細」と入力された場合は直前候補の詳細を表示
+            return self._delete_by_id(user_input.strip())
         if user_input.strip() == '詳細':
             return self.show_event_details()
         response = self.chat.send_message(user_input)
-        json_blocks = self.extract_all_json_blocks(response.text)
+        json_blocks = self._extract_all_json_blocks(response.text)
         messages = []
         for block in json_blocks:
             action = block.get('action')
             if action == 'add':
-                messages.append(self.add_event(block))
+                messages.append(self._add_event(block))
             elif action == 'delete':
-                messages.append(self.delete_event(block))
+                messages.append(self._delete_event(block, user_input))
             elif action == 'edit':
-                messages.append(self.edit_event(block))
+                messages.append(self._edit_event(block))
             elif action == 'list':
-                start_time = block.get('start_time')
-                end_time = block.get('end_time')
-                if not start_time or not end_time:
-                    now = datetime.now(tools.JST)
-                    start_time = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(timespec='seconds')
-                    if now.month == 12:
-                        end_dt = now.replace(year=now.year+1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-                    else:
-                        end_dt = now.replace(month=now.month+1, day=1, hour=0, minute=0, second=0, microsecond=0)
-                    end_time = end_dt.isoformat(timespec='seconds')
-                if '+' not in start_time and 'Z' not in start_time:
-                    start_time += '+09:00'
-                if '+' not in end_time and 'Z' not in end_time:
-                    end_time += '+09:00'
-                period_str = self.format_period(start_time, end_time)
-                event_list = self.list_events(start_time, end_time)
-                messages.append(f"{period_str}の予定:\n{event_list}")
-        if messages:
-            return '\n'.join(messages)
-        return response.text
+                messages.append(self._list_event_action(block))
+        return '\n'.join(messages) if messages else response.text
 
-    def extract_all_json_blocks(self, text):
-        # すべてのJSONコードブロックを抽出
-        return [json.loads(m) for m in re.findall(r'\{[\s\S]*?\}', text)]
+    def _delete_by_id(self, event_id):
+        del_result = tools.delete_calendar_event(event_id)
+        return json.loads(del_result).get('message', f'イベントID {event_id} を削除しました。')
 
-    # 日付・時刻・期間の日本語フォーマット関数
-    @staticmethod
-    def format_event_date(start, end, is_all_day=False):
-        # 終日イベントや日付のみの場合
-        try:
-            sdt = datetime.fromisoformat(start.replace('Z', '+09:00'))
-            edt = datetime.fromisoformat(end.replace('Z', '+09:00'))
-        except Exception:
-            return f"{start}〜{end}"
-        wdays = ['月', '火', '水', '木', '金', '土', '日']
-        if is_all_day or (sdt.hour == 0 and edt.hour == 0 and (edt-sdt).days == 1):
-            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）"
-        elif sdt.date() == edt.date():
-            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）{sdt.strftime('%H:%M')}〜{edt.strftime('%H:%M')}"
-        else:
-            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）{sdt.strftime('%H:%M')}〜{edt.year}年{edt.month}月{edt.day}日（{wdays[edt.weekday()]}）{edt.strftime('%H:%M')}"
-
-    @staticmethod
-    def format_period(start, end, summary=None):
-        try:
-            sdt = datetime.fromisoformat(start.replace('Z', '+09:00'))
-            edt = datetime.fromisoformat(end.replace('Z', '+09:00'))
-        except Exception:
-            return f"期間: {start} - {end}"
-        # 同日かつ時刻あり
-        if sdt.date() == edt.date():
-            if sdt.hour != 0 or edt.hour != 0:
-                return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d}, {sdt.strftime('%H:%M')} - {edt.strftime('%H:%M')}"
-            else:
-                return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d}"
-        if sdt.year == edt.year and sdt.month == edt.month and sdt.day == 1 and (edt.day == 1 or (edt - sdt).days >= 27):
-            return f"{sdt.year}年{sdt.month}月"
-        return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d} - {edt.year}-{edt.month:02d}-{edt.day:02d}"
-
-    def add_event(self, block):
+    def _add_event(self, block):
         result = tools.add_calendar_event(
             summary=block.get('summary'),
             start_time=block.get('start_time'),
@@ -127,17 +83,7 @@ class CalendarAgent:
         )
         return json.loads(result).get('message')
 
-    def list_events(self, start_time, end_time):
-        result = tools.list_calendar_events(start_time, end_time)
-        events = json.loads(result).get('events', [])
-        if not events:
-            return '予定はありません。'
-        event_list = '\n'.join([
-            f"{self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』" for e in events
-        ])
-        return event_list
-
-    def edit_event(self, block):
+    def _edit_event(self, block):
         summary = block.get('summary')
         start_time = block.get('start_time')
         end_time = block.get('end_time')
@@ -195,18 +141,26 @@ class CalendarAgent:
             self._last_candidates = candidates
             return msg
 
-    def show_event_details(self):
-        # 直前の候補リストの詳細を表示
-        if not hasattr(self, '_last_candidates') or not self._last_candidates:
-            return '直前に候補リストがありません。'
-        msg = '候補予定の詳細:\n'
-        for idx, e in enumerate(self._last_candidates):
-            msg += f"{idx+1}: {self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』\n"
-            msg += f"  ID: {e['id']}\n  説明: {e.get('description','')}\n  場所: {e.get('location','')}\n"
-        return msg
+    def _list_event_action(self, block):
+        start_time = block.get('start_time')
+        end_time = block.get('end_time')
+        if not start_time or not end_time:
+            now = datetime.now(tools.JST)
+            start_time = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(timespec='seconds')
+            if now.month == 12:
+                end_dt = now.replace(year=now.year+1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                end_dt = now.replace(month=now.month+1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_time = end_dt.isoformat(timespec='seconds')
+        if '+' not in start_time and 'Z' not in start_time:
+            start_time += '+09:00'
+        if '+' not in end_time and 'Z' not in end_time:
+            end_time += '+09:00'
+        period_str = self.format_period(start_time, end_time)
+        event_list = self.list_events(start_time, end_time)
+        return f"{period_str}の予定:\n{event_list}"
 
-    # delete_eventにも詳細表示ロジックを追加
-    def delete_event(self, block):
+    def _delete_event(self, block, user_input):
         summary = block.get('summary')
         start_time = block.get('start_time')
         end_time = block.get('end_time')
@@ -243,11 +197,63 @@ class CalendarAgent:
             msg = json.loads(del_result).get('message', '削除しました。')
             return msg
         else:
-            msg = '複数の削除候補が見つかりました。番号で選ぶか「詳細」と入力してください:\n'
-            for idx, e in enumerate(candidates):
-                msg += f"{idx+1}: {self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』\n"
-            self._last_candidates = candidates
-            return msg
+            # LLMに候補リストとユーザー指示を渡して判断させる
+            candidate_list = '\n'.join([
+                f"{idx+1}: {self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』" for idx, e in enumerate(candidates)
+            ])
+            prompt = f"次の削除候補があります。\n{candidate_list}\n\nユーザー指示: {block.get('user_input', '')}\nどの予定を削除すべきか、番号または'全部'で答えてください。" 
+            ai_response = self.chat.send_message(prompt).text.strip()
+            # 番号や'全部'を抽出
+            to_delete = []
+            if '全部' in ai_response or '全て' in ai_response or 'すべて' in ai_response:
+                to_delete = list(range(len(candidates)))
+            else:
+                nums = re.findall(r'\d+', ai_response)
+                to_delete = [int(n)-1 for n in nums if 0 < int(n) <= len(candidates)]
+            if not to_delete:
+                return f"AIの判断が曖昧でした: {ai_response}\n番号や'全部'でご指示ください。"
+            msgs = []
+            for idx in to_delete:
+                event_id = candidates[idx]['id']
+                del_result = tools.delete_calendar_event(event_id)
+                msg = json.loads(del_result).get('message', f"削除しました: {candidates[idx]['summary']}")
+                msgs.append(msg)
+            return '\n'.join(msgs)
+
+    def _extract_all_json_blocks(self, text):
+        # すべてのJSONコードブロックを抽出
+        return [json.loads(m) for m in re.findall(r'\{[\s\S]*?\}', text)]
+
+    @staticmethod
+    def format_event_date(start, end, is_all_day=False):
+        try:
+            sdt = datetime.fromisoformat(start.replace('Z', '+09:00'))
+            edt = datetime.fromisoformat(end.replace('Z', '+09:00'))
+        except Exception:
+            return f"{start}〜{end}"
+        wdays = ['月', '火', '水', '木', '金', '土', '日']
+        if is_all_day or (sdt.hour == 0 and edt.hour == 0 and (edt-sdt).days == 1):
+            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）"
+        elif sdt.date() == edt.date():
+            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）{sdt.strftime('%H:%M')}〜{edt.strftime('%H:%M')}"
+        else:
+            return f"{sdt.year}年{sdt.month}月{sdt.day}日（{wdays[sdt.weekday()]}）{sdt.strftime('%H:%M')}〜{edt.year}年{edt.month}月{edt.day}日（{wdays[edt.weekday()]}）{edt.strftime('%H:%M')}"
+
+    @staticmethod
+    def format_period(start, end, summary=None):
+        try:
+            sdt = datetime.fromisoformat(start.replace('Z', '+09:00'))
+            edt = datetime.fromisoformat(end.replace('Z', '+09:00'))
+        except Exception:
+            return f"期間: {start} - {end}"
+        if sdt.date() == edt.date():
+            if sdt.hour != 0 or edt.hour != 0:
+                return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d}, {sdt.strftime('%H:%M')} - {edt.strftime('%H:%M')}"
+            else:
+                return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d}"
+        if sdt.year == edt.year and sdt.month == edt.month and sdt.day == 1 and (edt.day == 1 or (edt - sdt).days >= 27):
+            return f"{sdt.year}年{sdt.month}月"
+        return f"期間: {sdt.year}-{sdt.month:02d}-{sdt.day:02d} - {edt.year}-{edt.month:02d}-{edt.day:02d}"
 
     def list_events(self, start_time, end_time):
         result = tools.list_calendar_events(start_time, end_time)
@@ -258,3 +264,12 @@ class CalendarAgent:
             f"{self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』" for e in events
         ])
         return event_list
+
+    def show_event_details(self):
+        if not hasattr(self, '_last_candidates') or not self._last_candidates:
+            return '直前に候補リストがありません。'
+        msg = '候補予定の詳細:\n'
+        for idx, e in enumerate(self._last_candidates):
+            msg += f"{idx+1}: {self.format_event_date(e['start'], e['end'], e.get('is_all_day', False))}『{e['summary']}』\n"
+            msg += f"  ID: {e['id']}\n  説明: {e.get('description','')}\n  場所: {e.get('location','')}\n"
+        return msg

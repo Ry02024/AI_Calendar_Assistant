@@ -11,3 +11,6 @@ env/
 # Secret Files
 token.json
 credentials.json
+
+# Knowledge Directory
+/knowledge/*
