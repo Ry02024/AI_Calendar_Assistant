@@ -13,6 +13,6 @@ token.json
 credentials.json
 
 # Knowledge Directory
-/knowledge/*
-!/knowledge/dummy.txt  # ダミーファイルを除外しない
-!/knowledge/README.md  # READMEファイルを除外しない
+knowledge/*
+!knowledge/dummy.txt  # ダミーファイルを除外しない
+!knowledge/README.md  # READMEファイルを除外しない
