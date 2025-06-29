@@ -8,3 +8,6 @@ google-auth-oauthlib
 
 # .envファイル読み込み用
 python-dotenv
+
+# Webフレームワーク
+Flask

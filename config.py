@@ -16,5 +16,5 @@ GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 MODEL_NAME = "gemini-2.5-pro"
 
 # 認証情報ファイルのパス
-GOOGLE_CREDS_FILE = "credentials.json"
-GOOGLE_TOKEN_FILE = "token.json"
+GOOGLE_CREDS_FILE = os.path.abspath("credentials.json")
+GOOGLE_TOKEN_FILE = os.path.abspath("token.json")

@@ -8,6 +8,10 @@
 - 予定の追加・確認・削除・編集を日本語で柔軟に対話
 - 期間や予定の表示も日本語で分かりやすく
 - 複数候補時は「詳細」コマンドでIDや説明・場所も確認可能
+- Web UI（Flask）とCLIの両方に対応
+- knowledge/ ディレクトリの知識ファイルを自動でプロンプトに注入し、ユーザーの価値観や方針を反映
+- 会話履歴（chat_history）を活用し、文脈推論や曖昧な指示にも対応
+- Geminiが文脈や指示内容から「終日」か「時間帯指定」かも自動で判断し、最適な予定形式を提案
 
 ## セットアップ
 1. **Google CloudでAPI認証情報を作成し、`credentials.json`を配置**
@@ -19,8 +23,13 @@
 4. 初回実行時はGoogle認証フローが表示されます
 
 ## 使い方
+### CLI
 ```sh
 python main.py
+```
+### Web UI
+```sh
+python app.py
 ```
 - 例: 「6月28日の土曜出勤を削除」「今年の予定を確認」「晩餐の予定の詳細にオーガニック、場所は帝国ホテルを追記」など
 - 「詳細」と入力すると直前の候補リストの詳細を表示
@@ -31,9 +40,30 @@ python main.py
 - Google Calendar APIの利用にはGoogleアカウントが必要です
 
 ## 知識ファイル（knowledge/ ディレクトリ）について
-- `knowledge/` ディレクトリ内のテキストファイル（例: `user_profile_life_pattern.txt`）は、AIアシスタントの知識として自動的にプロンプトに注入されます。
-- 生活パターンやユーザープロファイルなど、AIに反映したい情報を自由に追加できます。
+- `knowledge/` ディレクトリ内のテキストファイル（例: `plan_guidelines.txt`, `user_profile_life_pattern.txt`）は、AIアシスタントの知識として自動的にプロンプトに注入されます。
+- 生活パターンやユーザープロファイル、計画方針・価値観など、AIに反映したい情報を自由に追加できます。
 - 個人情報を含む場合は `.gitignore` で `knowledge/*` を管理対象外にしています（リポジトリには含まれません）。
+
+### 例: plan_guidelines.txt
+```
+【計画の全体的な目的】
+日々や仕事の忙しさに左右されず、心身ともに健やかで自分らしい生活を送るための戦略的な準備と休息を確保すること。
+
+【計画の方針・価値観】
+1. プロアクティブな準備（事前準備）: 忙しくなる前に「楽しみ」や「癒し」を計画し、モチベーション維持やストレス軽減を図る。
+2. 質の高い休息: 休息やリフレッシュの時間を意識的に設け、知的好奇心や心の充足も大切にする。
+
+【計画の粒度例】
+- 日次: 毎日のリラックスタイムやセルフケア
+- 週次: 趣味や文化的活動、家族・友人との交流
+- 月次: 目標設定や新しい挑戦、特別なイベント
+- 年次: 長期的な成長や楽しみ（旅行、学びなど）
+
+【アシスタントへの指示】
+- 予定提案やリマインド時は、上記の目的や方針に沿ったアドバイス・提案を優先すること。
+- 具体的な時期や内容は、必要に応じてユーザーに質問し確認すること。
+- ユーザーの指示が曖昧な場合も、これらの価値観を参考に最適な予定やアクションを考えること。
+```
 
 ### 例: user_profile_life_pattern.txt
 ```
@@ -55,25 +85,23 @@ python main.py
 ```
 AI_Calendar_Assistant/
 ├── main.py
+├── app.py
 ├── requirements.txt
 ├── .env
 ├── .gitignore
 ├── credentials.json (非公開)
 ├── token.json (非公開)
+├── config.py
+├── knowledge/
+│   ├── plan_guidelines.txt
+│   └── user_profile_life_pattern.txt
 └── src/
     └── calendar_agent/
         ├── agent.py
-        └── tools.py
-├── config.py
-├── knowledge/
-│   └── user_profile_life_pattern.txt
-├── src/
-│   └── calendar_agent/
-│       ├── agent.py
-│       ├── tools.py
-│       ├── knowledge_handler.py
-│       └── __init__.py
-└── ...
+        ├── tools.py
+        ├── knowledge_handler.py
+        └── __init__.py
+...
 ```
 
 ---
