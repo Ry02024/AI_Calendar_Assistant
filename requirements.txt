@@ -1,0 +1,10 @@
+# Google Gemini API (新しい推奨ライブラリ)
+google-genai
+
+# Google API Client (Calendar連携用)
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+
+# .envファイル読み込み用
+python-dotenv
