@@ -172,14 +172,9 @@ document.addEventListener('DOMContentLoaded', () => {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // チャット下部にGoogleカレンダー全体を開くボタンを追加
-    if (!document.getElementById('open-gcal-btn')) {
-        const btn = document.createElement('a');
-        btn.id = 'open-gcal-btn';
-        btn.href = 'https://calendar.google.com/calendar/';
-        btn.target = '_blank';
-        btn.textContent = 'Googleカレンダーで全体を開く';
-        btn.style = 'display:block;margin:1.5em auto 0 auto;width:max-content;padding:0.7em 1.5em;background:#7692FF;color:#fff;border-radius:8px;text-decoration:none;font-weight:500;box-shadow:0 2px 8px rgba(0,0,0,0.08);';
-        document.querySelector('.chat-container').appendChild(btn);
+    // チャット下部にGoogleカレンダー全体を開くボタンを追加（不要なら削除）
+    const gcalBtn = document.getElementById('open-gcal-btn');
+    if (gcalBtn) {
+        gcalBtn.remove();
     }
 });
