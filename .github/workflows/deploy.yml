@@ -3,7 +3,8 @@ name: Deploy to Google Cloud Run
 on:
   push:
     branches:
-      - main  # mainブランチにプッシュされたら実行
+      - stable-version  # mainブランチにプッシュされたら実行
+  workflow_dispatch:
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
